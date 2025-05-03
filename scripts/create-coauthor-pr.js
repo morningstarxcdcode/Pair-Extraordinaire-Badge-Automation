@@ -1,106 +1,116 @@
-const { Octokit } = require('@octokit/rest');
+const { Octokit } = require("@octokit/rest");
 
-const token = process.env.GITHUB_TOKEN;
-const repo = process.env.REPO;
-const actor = process.env.ACTOR;
-
-// Number of PRs to create per run (default 5)
-const PRS_PER_RUN = parseInt(process.env.PRS_PER_RUN) || 5;
-
-// Delay between PR creations in ms (default 30000ms = 30 seconds)
-const DELAY_MS = parseInt(process.env.DELAY_MS) || 30000;
-
-if (!token || !repo || !actor) {
-  console.error('Missing required environment variables.');
-  process.exit(1);
-}
-
+const token = process.env.MY_GITHUB_TOKEN;
 const octokit = new Octokit({ auth: token });
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+const repoOwner = 'morningstarxcdcode'; // Your GitHub username
+const repoName = 'Pair-Extraordinaire-Badge-Automation'; // Your repository name
+
+const prsPerRun = 5; // Number of PRs to create per workflow run
+const delayMs = 10000; // Delay between PR creations in milliseconds
 
 async function createAndMergePR(index) {
   try {
-    const [owner, repoName] = repo.split('/');
+    const branchName = `coauthor-badge-branch-${Date.now()}-${index}`;
+    const baseBranch = 'main';
 
-    // Generate a unique branch name
-    const branchName = `coauthor-pr-${Date.now()}-${index}`;
+    // Get the latest commit SHA of the base branch
+    const baseBranchData = await octokit.repos.getBranch({
+      owner: repoOwner,
+      repo: repoName,
+      branch: baseBranch,
+    });
+    const baseCommitSha = baseBranchData.data.commit.sha;
 
-    // Get default branch
-    const { data: repoData } = await octokit.repos.get({ owner, repo: repoName });
-    const defaultBranch = repoData.default_branch;
-
-    // Get the latest commit SHA of default branch
-    const { data: refData } = await octokit.git.getRef({ owner, repo: repoName, ref: `heads/${defaultBranch}` });
-    const latestCommitSha = refData.object.sha;
-
-    // Create new branch
+    // Create a new branch from the base branch
     await octokit.git.createRef({
-      owner,
+      owner: repoOwner,
       repo: repoName,
       ref: `refs/heads/${branchName}`,
-      sha: latestCommitSha,
+      sha: baseCommitSha,
     });
 
-    // Create a new file or update a file with a commit containing coauthor trailer
-    const filePath = `coauthor-badge-${index}.txt`;
-    const content = `This commit is to get the Pair Extraordinaire badge.\n\nCo-authored-by: Fake Coauthor <fakecoauthor@example.com>\n`;
-    const contentEncoded = Buffer.from(content).toString('base64');
+    // Create a new file content
+    const filePath = `coauthored-file-${Date.now()}-${index}.txt`;
+    const fileContent = `This is a coauthored commit file #${index}`;
 
-    // Check if file exists to get its SHA
-    let fileSha = null;
-    try {
-      const { data: fileData } = await octokit.repos.getContent({ owner, repo: repoName, path: filePath, ref: branchName });
-      fileSha = fileData.sha;
-    } catch (e) {
-      // File does not exist, will create new
-    }
-
-    // Create or update file with commit
-    await octokit.repos.createOrUpdateFileContents({
-      owner,
+    // Create a blob for the new file
+    const blob = await octokit.git.createBlob({
+      owner: repoOwner,
       repo: repoName,
-      path: filePath,
-      message: 'Add coauthor trailer commit for badge',
-      content: contentEncoded,
-      branch: branchName,
-      sha: fileSha || undefined,
+      content: Buffer.from(fileContent).toString('base64'),
+      encoding: 'base64',
     });
 
-    // Create pull request
-    const { data: pr } = await octokit.pulls.create({
-      owner,
+    // Get the tree SHA of the base commit
+    const baseCommitData = await octokit.git.getCommit({
+      owner: repoOwner,
       repo: repoName,
-      title: 'Coauthor Badge PR',
+      commit_sha: baseCommitSha,
+    });
+    const baseTreeSha = baseCommitData.data.tree.sha;
+
+    // Create a new tree with the new blob
+    const newTree = await octokit.git.createTree({
+      owner: repoOwner,
+      repo: repoName,
+      base_tree: baseTreeSha,
+      tree: [
+        {
+          path: filePath,
+          mode: '100644',
+          type: 'blob',
+          sha: blob.data.sha,
+        },
+      ],
+    });
+
+    // Create a new commit with coauthor trailer
+    const commitMessage = `feat: coauthored commit #${index}\n\nCo-authored-by: Fake User <fakeuser@example.com>`;
+    const newCommit = await octokit.git.createCommit({
+      owner: repoOwner,
+      repo: repoName,
+      message: commitMessage,
+      tree: newTree.data.sha,
+      parents: [baseCommitSha],
+    });
+
+    // Update the branch ref to point to the new commit
+    await octokit.git.updateRef({
+      owner: repoOwner,
+      repo: repoName,
+      ref: `heads/${branchName}`,
+      sha: newCommit.data.sha,
+    });
+
+    // Create a pull request
+    const pr = await octokit.pulls.create({
+      owner: repoOwner,
+      repo: repoName,
+      title: `Coauthored PR #${index}`,
       head: branchName,
-      base: defaultBranch,
-      body: 'This PR is created to get the Pair Extraordinaire badge.',
+      base: baseBranch,
+      body: 'Automated coauthored pull request to earn Pair Extraordinaire badge.',
     });
 
-    // Merge pull request
+    // Merge the pull request
     await octokit.pulls.merge({
-      owner,
+      owner: repoOwner,
       repo: repoName,
-      pull_number: pr.number,
+      pull_number: pr.data.number,
       merge_method: 'merge',
     });
 
-    console.log(`Pull request #${pr.number} created and merged successfully.`);
+    console.log(`Successfully created and merged PR #${index}`);
   } catch (error) {
-    console.error('Error:', error);
-    process.exit(1);
+    console.error(`Error in PR #${index}:`, error);
   }
 }
 
 async function run() {
-  for (let i = 1; i <= PRS_PER_RUN; i++) {
+  for (let i = 1; i <= prsPerRun; i++) {
     await createAndMergePR(i);
-    if (i < PRS_PER_RUN) {
-      console.log(`Waiting ${DELAY_MS / 1000} seconds before next PR...`);
-      await delay(DELAY_MS);
-    }
+    await new Promise(resolve => setTimeout(resolve, delayMs));
   }
 }
 
