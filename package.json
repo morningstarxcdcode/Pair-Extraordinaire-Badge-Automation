@@ -1,0 +1,16 @@
+{
+  "name": "pair-extraordinaire-badge-automation",
+  "version": "1.0.0",
+  "description": "GitHub Account: morningstarxcdcode Repository URL: https://github.com/morningstarxcdcode/Pair-Extraordinaire-Badge-Automation",
+  "main": "scripts/create-coauthor-pr.js",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/create-coauthor-pr.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@octokit/rest": "^20.0.0"
+  }
+}
